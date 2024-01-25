@@ -1,0 +1,1058 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>5-in-5 | ÖV42 by 42Hacks</title>
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <link
+      rel="icon"
+      type="image/x-icon"
+      href="https://raw.githubusercontent.com/mapbox/assembly/publisher-staging/src/svgs/mapbox.svg"
+    />
+    <script src="https://api.tiles.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.js"></script>
+    <link
+      href="https://api.tiles.mapbox.com/mapbox-gl-js/v2.11.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/intersection-observer@0.12.0/intersection-observer.js"></script>
+    <script src="https://unpkg.com/scrollama"></script>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.0/mapbox-gl.js"></script>
+    <link
+      href="https://api.mapbox.com/mapbox-gl-js/v3.1.0/mapbox-gl.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: sans-serif;
+      }
+      a,
+      a:hover,
+      a:visited {
+        color: #0071bc;
+      }
+      #map {
+        top: 0;
+        height: 100vh;
+        width: 100vw;
+        position: fixed;
+      }
+      #mapInset {
+        bottom: 50px;
+        right: 30px;
+        height: 180px;
+        width: 250px;
+        max-width: 100%;
+        position: fixed;
+        z-index: 1;
+        opacity: 1;
+        transition: opacity 0.5s ease-in-out;
+        pointer-events: none;
+      }
+      #mapInset .mapboxgl-ctrl-bottom-left {
+        display: none;
+      }
+      @media (max-width: 500px) {
+        #mapInset {
+          display: none;
+        }
+      }
+      #header {
+        margin: auto;
+        width: 100%;
+        position: relative;
+        z-index: 5;
+      }
+      #header h1,
+      #header h2,
+      #header p {
+        margin: 0;
+        padding: 2vh 2vw;
+        text-align: center;
+      }
+      #footer {
+        width: 100%;
+        min-height: 5vh;
+        padding-top: 2vh;
+        padding-bottom: 2vh;
+        text-align: center;
+        line-height: 25px;
+        font-size: 13px;
+        position: relative;
+        z-index: 5;
+      }
+      #features {
+        padding-top: 10vh;
+        padding-bottom: 10vh;
+      }
+      .hidden {
+        visibility: hidden;
+      }
+      .centered {
+        width: 50vw;
+        margin: 0 auto;
+      }
+      .lefty {
+        width: 33vw;
+        margin-left: 5vw;
+      }
+      .righty {
+        width: 33vw;
+        margin-left: 62vw;
+      }
+      .fully {
+        width: 100%;
+        margin: auto;
+      }
+      .light {
+        color: #444;
+        background-color: #fafafa;
+      }
+      .dark {
+        color: #fafafa;
+        background-color: #444;
+      }
+      .step {
+        padding-bottom: 50vh;
+        /* margin-bottom: 10vh; */
+        opacity: 0.25;
+      }
+      .step.active {
+        opacity: 0.9;
+      }
+
+      .step div {
+        padding: 25px 50px;
+        line-height: 25px;
+        font-size: 13px;
+      }
+
+      .step img {
+        width: 100%;
+      }
+
+      @media (max-width: 750px) {
+        .centered,
+        .lefty,
+        .righty,
+        .fully {
+          width: 90vw;
+          margin: 0 auto;
+        }
+      }
+
+      /* Fix issue on mobile browser where scroll breaks  */
+      .mapboxgl-canvas-container.mapboxgl-touch-zoom-rotate.mapboxgl-touch-drag-pan,
+      .mapboxgl-canvas-container.mapboxgl-touch-zoom-rotate.mapboxgl-touch-drag-pan
+        .mapboxgl-canvas {
+        touch-action: unset;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="mapInset"></div>
+    <div id="story"></div>
+
+    <script src="./config.js"></script>
+    <script>
+      const URL = "https://api-dev.ov42.com/api/";
+
+      var initLoad = true;
+      var layerTypes = {
+        fill: ["fill-opacity"],
+        line: ["line-opacity"],
+        circle: ["circle-opacity", "circle-stroke-opacity"],
+        symbol: ["icon-opacity", "text-opacity"],
+        raster: ["raster-opacity"],
+        "fill-extrusion": ["fill-extrusion-opacity"],
+        heatmap: ["heatmap-opacity"],
+      };
+
+      var alignments = {
+        left: "lefty",
+        center: "centered",
+        right: "righty",
+        full: "fully",
+      };
+
+      function getLayerPaintType(layer) {
+        var layerType = map.getLayer(layer).type;
+        return layerTypes[layerType];
+      }
+
+      function setLayerOpacity(layer) {
+        var paintProps = getLayerPaintType(layer.layer);
+        paintProps.forEach(function (prop) {
+          var options = {};
+          if (layer.duration) {
+            var transitionProp = prop + "-transition";
+            options = { duration: layer.duration };
+            map.setPaintProperty(layer.layer, transitionProp, options);
+          }
+          map.setPaintProperty(layer.layer, prop, layer.opacity, options);
+        });
+      }
+
+      var story = document.getElementById("story");
+      var features = document.createElement("div");
+      features.setAttribute("id", "features");
+
+      var header = document.createElement("div");
+
+      if (config.title) {
+        var titleText = document.createElement("h1");
+        titleText.innerText = config.title;
+        header.appendChild(titleText);
+      }
+
+      if (config.subtitle) {
+        var subtitleText = document.createElement("h2");
+        subtitleText.innerText = config.subtitle;
+        header.appendChild(subtitleText);
+      }
+
+      if (config.byline) {
+        var bylineText = document.createElement("p");
+        bylineText.innerText = config.byline;
+        header.appendChild(bylineText);
+      }
+
+      if (header.innerText.length > 0) {
+        header.classList.add(config.theme);
+        header.setAttribute("id", "header");
+        story.appendChild(header);
+      }
+
+      config.chapters.forEach((record, idx) => {
+        var container = document.createElement("div");
+        var chapter = document.createElement("div");
+
+        if (record.title) {
+          var title = document.createElement("h3");
+          title.style.fontSize = "20px";
+          title.innerText = record.title;
+          chapter.appendChild(title);
+        }
+
+        if (record.image) {
+          var image = new Image();
+          image.src = record.image;
+          chapter.appendChild(image);
+        }
+
+        if (record.description) {
+          var story = document.createElement("p");
+          story.style.fontSize = "15px";
+          story.innerHTML = record.description;
+          chapter.appendChild(story);
+        }
+
+        container.setAttribute("id", record.id);
+        container.classList.add("step");
+        if (idx === 0) {
+          container.classList.add("active");
+        }
+
+        chapter.classList.add(config.theme);
+        container.appendChild(chapter);
+        container.classList.add(alignments[record.alignment] || "centered");
+        if (record.hidden) {
+          container.classList.add("hidden");
+        }
+        features.appendChild(container);
+      });
+
+      story.appendChild(features);
+
+      var footer = document.createElement("div");
+
+      if (config.footer) {
+        var footerText = document.createElement("p");
+        footerText.innerHTML = config.footer;
+        footer.appendChild(footerText);
+      }
+
+      if (footer.innerText.length > 0) {
+        footer.classList.add(config.theme);
+        footer.setAttribute("id", "footer");
+        story.appendChild(footer);
+      }
+
+      mapboxgl.accessToken = config.accessToken;
+
+      const transformRequest = (url) => {
+        const hasQuery = url.indexOf("?") !== -1;
+        const suffix = hasQuery
+          ? "&pluginName=scrollytellingV2"
+          : "?pluginName=scrollytellingV2";
+        return {
+          url: url + suffix,
+        };
+      };
+
+      var map = new mapboxgl.Map({
+        container: "map",
+        style: config.style,
+        center: config.chapters[0].location.center,
+        zoom: config.chapters[0].location.zoom,
+        bearing: config.chapters[0].location.bearing,
+        pitch: config.chapters[0].location.pitch,
+        interactive: false,
+        transformRequest: transformRequest,
+        projection: config.projection,
+      });
+
+      if (config.showMarkers) {
+        var marker = new mapboxgl.Marker({ color: config.markerColor });
+        marker.setLngLat(config.chapters[0].location.center).addTo(map);
+      }
+
+      // instantiate the scrollama
+      var scroller = scrollama();
+
+      map.on("load", function () {
+        // setup the instance, pass callback functions
+        scroller
+          .setup({
+            step: ".step",
+            offset: 0.5,
+            progress: true,
+          })
+          .onStepEnter(async (response) => {
+            var current_chapter = config.chapters.findIndex(
+              (chap) => chap.id === response.element.id
+            );
+            var chapter = config.chapters[current_chapter];
+
+            response.element.classList.add("active");
+            map[chapter.mapAnimation || "flyTo"](chapter.location);
+
+            // Incase you do not want to have a dynamic inset map,
+            // rather want to keep it a static view but still change the
+            // bbox as main map move: comment out the below if section.
+
+            if (chapter.onChapterEnter.length > 0) {
+              chapter.onChapterEnter.forEach(setLayerOpacity);
+            }
+            if (chapter.callback) {
+              window[chapter.callback]();
+            }
+            if (chapter.rotateAnimation) {
+              map.once("moveend", () => {
+                const rotateNumber = map.getBearing();
+                map.rotateTo(rotateNumber + 180, {
+                  duration: 30000,
+                  easing: function (t) {
+                    return t;
+                  },
+                });
+              });
+            }
+            if (config.auto) {
+              var next_chapter = (current_chapter + 1) % config.chapters.length;
+              map.once("moveend", () => {
+                document
+                  .querySelectorAll(
+                    '[data-scrollama-index="' + next_chapter.toString() + '"]'
+                  )[0]
+                  .scrollIntoView();
+              });
+            }
+
+            // Lines - Slide 1
+            map.addSource("data-insights-trips", {
+              type: "geojson",
+              data:
+                URL +
+                "train_vs_cars/2020-06,bfs/days,0,0,0,-2000,2000,0,290000,500,182000,0,100,0,0,1,4",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-insights-trips",
+              id: "line-background",
+              paint: {
+                "line-color": "#f79d5c",
+                "line-width": 1.5,
+                "line-opacity": 0.2,
+              },
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-insights-trips",
+              id: "line-dashed",
+              paint: {
+                "line-color": "#f3752b",
+                "line-width": 1.5,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            // Lines - Slide 3
+            map.addSource("data-trips-hotspots", {
+              type: "geojson",
+              data:
+                URL +
+                "train_vs_cars/2023-09,bfs/days,0,0,0,-2000,2000,0,400000,1000,182000,8,100,0,0,1,10",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-trips-hotspots",
+              id: "line-background-trips-hotspots",
+              paint: {
+                "line-color": ["get", "color"],
+                "line-width": 1.5,
+                "line-opacity": 0.2,
+              },
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-trips-hotspots",
+              id: "line-dashed-trips-hotspots",
+              paint: {
+                "line-color": ["get", "color"],
+                "line-width": 1.5,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            //Line - Slide 3, 3a, 3b, 3c
+            map.addSource("data-1-tiles", {
+              type: "geojson",
+              data:
+                URL + "tile_potential_employer/top_hotspots_visualization/1",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "1-tiles",
+              type: "fill",
+              source: "data-1-tiles",
+              layout: {},
+              paint: {
+                "fill-color": "#9c0c84",
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-1-tiles",
+              type: "line",
+              source: "data-1-tiles",
+              layout: {},
+              paint: {
+                "line-color": "#9c0c84",
+                "line-width": 1,
+              },
+            });
+
+            map.addSource("data-100-tiles", {
+              type: "geojson",
+              data:
+                URL + "tile_potential_employer/top_hotspots_visualization/100",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "100-tiles",
+              type: "fill",
+              source: "data-100-tiles",
+              layout: {},
+              paint: {
+                "fill-color": "#9c0c84",
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-100-tiles",
+              type: "line",
+              source: "data-100-tiles",
+              layout: {},
+              paint: {
+                "line-color": "#9c0c84",
+                "line-width": 1,
+              },
+            });
+
+            map.addSource("data-1000-tiles", {
+              type: "geojson",
+              data:
+                URL + "tile_potential_employer/top_hotspots_visualization/1000",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "1000-tiles",
+              type: "fill",
+              source: "data-1000-tiles",
+              layout: {},
+              paint: {
+                "fill-color": "#9c0c84",
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-1000-tiles",
+              type: "line",
+              source: "data-1000-tiles",
+              layout: {},
+              paint: {
+                "line-color": "#9c0c84",
+                "line-width": 1,
+              },
+            });
+
+            //Line - Slide 4
+            map.addSource("companies", {
+              type: "geojson",
+              data: URL + "ai_zonen/arbetiszonen",
+            });
+
+            map.addLayer(
+              {
+                id: "companies-heat",
+                type: "heatmap",
+                source: "companies",
+                maxzoom: 9,
+                paint: {
+                  // Increase the heatmap weight based on frequency and property magnitude
+                  "heatmap-weight": [
+                    "interpolate",
+                    ["linear"],
+                    ["heatmap-density"],
+                    0,
+                    0.2,
+                    0.4,
+                    0.6,
+                    0.8,
+                    1,
+                  ],
+                  // Increase the heatmap color weight weight by zoom level
+                  // heatmap-intensity is a multiplier on top of heatmap-weight
+                  "heatmap-intensity": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    0,
+                    1,
+                    7,
+                    2,
+                  ],
+                  // Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
+                  // Begin color ramp at 0-stop with a 0-transparancy color
+                  // to create a blur-like effect.
+                  "heatmap-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["heatmap-density"],
+                    0,
+                    "rgba(233,62,58,0)",
+                    0.2,
+                    "#90e0ef",
+                    0.4,
+                    "#00b4d8",
+                    0.9,
+                    "#0096c7",
+                    0.95,
+                    "#0077b6",
+                    1,
+                    "#023e8a",
+                  ],
+                  // Adjust the heatmap radius by zoom level
+                  "heatmap-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    0,
+                    2,
+                    7,
+                    10,
+                  ],
+                  // Transition from heatmap to circle layer by zoom level
+                  "heatmap-opacity": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    7,
+                    1,
+                    9,
+                    0,
+                  ],
+                },
+              },
+              "waterway-label"
+            );
+
+            map.addSource("data-42000-tiles", {
+              type: "geojson",
+              data:
+                URL +
+                "tile_potential_employer/top_hotspots_visualization/42000",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "42000-tiles",
+              type: "fill",
+              source: "data-42000-tiles",
+              layout: {},
+              paint: {
+                "fill-color": "#9c0c84",
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-42000-tiles",
+              type: "line",
+              source: "data-42000-tiles",
+              layout: {},
+              paint: {
+                "line-color": "#9c0c84",
+                "line-width": 1,
+              },
+            });
+
+            //Line - Slide 6
+            map.addSource("data-buhler-trips", {
+              type: "geojson",
+              data:
+                URL +
+                "tile_od/2022-08/9.140001755396725,47.43900444159297/0,400000/0/trips/1/0/35000",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-buhler-trips",
+              id: "line-buhler-trips",
+              paint: {
+                "line-color": "#0faaab",
+                "line-width": 1.5,
+                "line-opacity": 0.2,
+              },
+            });
+
+            map.addLayer({
+              type: "line",
+              source: "data-buhler-trips",
+              id: "line-buhler-trips-dashed",
+              paint: {
+                "line-color": "#027f80",
+                "line-width": 1.5,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            //Line - Slide 7
+            map.addSource("data-b2b-sq-buhler", {
+              type: "geojson",
+              data: URL + "tile_potential/tile1km_buhler/color",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "b2b-sq-buhler",
+              type: "fill",
+              source: "data-b2b-sq-buhler",
+              layout: {},
+              paint: {
+                "fill-color": ["get", "color"],
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-b2b-sq-buhler",
+              type: "line",
+              source: "data-b2b-sq-buhler",
+              layout: {},
+              paint: {
+                "line-color": ["get", "color"],
+                "line-width": 1,
+              },
+            });
+
+            //Line - Slide 7a
+            map.addSource("data-line-green-car", {
+              type: "geojson",
+              data: URL + "tile_potential/car_vs_train_route/green/car",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "background-line-green-car",
+              type: "line",
+              source: "data-line-green-car",
+              layout: {},
+              paint: {
+                "line-color": "#9bd1e5",
+                "line-width": 4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-line-green-car",
+              type: "line",
+              source: "data-line-green-car",
+              layout: {},
+              paint: {
+                "line-color": "#1b4079",
+                "line-width": 4,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            map.addSource("data-line-green-train", {
+              type: "geojson",
+              data: URL + "tile_potential/car_vs_train_route/green/train",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "background-line-green-train",
+              type: "line",
+              source: "data-line-green-train",
+              layout: {},
+              paint: {
+                "line-color": "#6a994e",
+                "line-width": 4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-line-green-train",
+              type: "line",
+              source: "data-line-green-train",
+              layout: {},
+              paint: {
+                "line-color": "#007200",
+                "line-width": 4,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            //Line - Slide 7b
+            map.addSource("data-line-red-train", {
+              type: "geojson",
+              data: URL + "tile_potential/car_vs_train_route/red/train",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "background-line-red-trains",
+              type: "line",
+              source: "data-line-red-train",
+              layout: {},
+              paint: {
+                "line-color": "#ed3441",
+                "line-width": 4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-line-red-train",
+              type: "line",
+              source: "data-line-red-train",
+              layout: {},
+              paint: {
+                "line-color": "#a80712",
+                "line-width": 4,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            map.addSource("data-line-red-car", {
+              type: "geojson",
+              data: URL + "tile_potential/car_vs_train_route/red/car",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "background-line-red-car",
+              type: "line",
+              source: "data-line-red-car",
+              layout: {},
+              paint: {
+                "line-color": "#9bd1e5",
+                "line-width": 4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-line-red-car",
+              type: "line",
+              source: "data-line-red-car",
+              layout: {},
+              paint: {
+                "line-color": "#1b4079",
+                "line-width": 4,
+                "line-dasharray": [0, 4, 3],
+              },
+            });
+
+            //Line - Slide mid1
+            map.addSource("data-b2b-mid1-buhler", {
+              type: "geojson",
+              data: URL + "tile_potential/tile1km_buhler/color,color_last_mile",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "b2b-mid1-buhler",
+              type: "fill",
+              source: "data-b2b-mid1-buhler",
+              layout: {},
+              paint: {
+                "fill-color": ["get", "color_combined"],
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-b2b-mid1-buhler",
+              type: "line",
+              source: "data-b2b-mid1-buhler",
+              layout: {},
+              paint: {
+                "line-color": ["get", "color_combined"],
+                "line-width": 1,
+              },
+            });
+
+            //Line - Slide mid2
+            map.addSource("data-b2b-mid2-buhler", {
+              type: "geojson",
+              data: URL + "tile_potential/tile1km_buhler/color,color_last_mile,color_working",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "b2b-mid2-buhler",
+              type: "fill",
+              source: "data-b2b-mid2-buhler",
+              layout: {},
+              paint: {
+                "fill-color": ["get", "color_combined"],
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-b2b-mid2-buhler",
+              type: "line",
+              source: "data-b2b-mid2-buhler",
+              layout: {},
+              paint: {
+                "line-color": ["get", "color_combined"],
+                "line-width": 1,
+              },
+            });
+
+            //Line - Slide mid3
+            map.addSource("data-b2b-mid3-buhler", {
+              type: "geojson",
+              data: URL + "tile_potential/tile1km_buhler/color,color_last_mile,color_working,color_bike",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "b2b-mid3-buhler",
+              type: "fill",
+              source: "data-b2b-mid3-buhler",
+              layout: {},
+              paint: {
+                "fill-color": ["get", "color_combined"],
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-b2b-mid3-buhler",
+              type: "line",
+              source: "data-b2b-mid3-buhler",
+              layout: {},
+              paint: {
+                "line-color": ["get", "color_combined"],
+                "line-width": 1,
+              },
+            });
+
+
+            //Line - Slide 7c
+            map.addSource("data-b2b-measures-buhler", {
+              type: "geojson",
+              data: URL + "tile_potential/tile1km_buhler/color,color_last_mile,color_working,color_bike",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "b2b-measures-buhler",
+              type: "fill",
+              source: "data-b2b-measures-buhler",
+              layout: {},
+              paint: {
+                "fill-color": ["get", "color_combined"],
+                "fill-opacity": 0.4,
+              },
+            });
+
+            map.addLayer({
+              id: "outline-b2b-measures-buhler",
+              type: "line",
+              source: "data-b2b-measures-buhler",
+              layout: {},
+              paint: {
+                "line-color": ["get", "color_combined"],
+                "line-width": 1,
+              },
+            });
+
+            //Fill extrude - Slide 8
+            map.addSource("data-potentials-3d", {
+              type: "geojson",
+              data:
+                URL +
+                "tile_potential_employer/0/sum_0_all/0/1000,35000/all/potentials.geojson",
+              generateId: true,
+              lineMetrics: true,
+            });
+
+            map.addLayer({
+              id: "potentials-3d",
+              type: "fill-extrusion",
+              source: "data-potentials-3d",
+              layout: {},
+              paint: {
+                "fill-extrusion-color": "#027f80",
+                "fill-extrusion-height": [
+                  "get",
+                  "absolute_behavior_last_mile_bike_working_car_pooling_trips_sum_0_all",
+                ],
+                "fill-extrusion-opacity": 0.8,
+              },
+            });
+
+            const dashArraySequence = [
+              [0, 4, 3],
+              [0.5, 4, 2.5],
+              [1, 4, 2],
+              [1.5, 4, 1.5],
+              [2, 4, 1],
+              [2.5, 4, 0.5],
+              [3, 4, 0],
+              [0, 0.5, 3, 3.5],
+              [0, 1, 3, 3],
+              [0, 1.5, 3, 2.5],
+              [0, 2, 3, 2],
+              [0, 2.5, 3, 1.5],
+              [0, 3, 3, 1],
+              [0, 3.5, 3, 0.5],
+            ];
+
+            let step = 0;
+
+            function animateDashArray(timestamp) {
+              // Update line-dasharray using the next value in dashArraySequence. The
+              // divisor in the expression `timestamp / 50` controls the animation speed.
+              const newStep = parseInt(
+                (timestamp / 50) % dashArraySequence.length
+              );
+
+              if (newStep !== step) {
+                map.setPaintProperty(
+                  "line-dashed",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                map.setPaintProperty(
+                  "line-buhler-trips-dashed",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                map.setPaintProperty(
+                  "outline-line-green-train",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                map.setPaintProperty(
+                  "outline-line-green-car",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                map.setPaintProperty(
+                  "outline-line-red-train",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                map.setPaintProperty(
+                  "outline-line-red-car",
+                  "line-dasharray",
+                  dashArraySequence[step]
+                );
+
+                step = newStep;
+              }
+
+              // Request the next frame of the animation.
+              requestAnimationFrame(animateDashArray);
+            }
+
+            // start the animation
+            animateDashArray(0);
+          })
+          .onStepExit((response) => {
+            var chapter = config.chapters.find(
+              (chap) => chap.id === response.element.id
+            );
+            response.element.classList.remove("active");
+            if (chapter.onChapterExit.length > 0) {
+              chapter.onChapterExit.forEach(setLayerOpacity);
+            }
+          });
+
+        if (config.auto) {
+          document
+            .querySelectorAll('[data-scrollama-index="0"]')[0]
+            .scrollIntoView();
+        }
+      });
+
+      // setup resize event
+      window.addEventListener("resize", scroller.resize);
+    </script>
+  </body>
+</html>
